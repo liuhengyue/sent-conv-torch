@@ -126,7 +126,6 @@ end
 
 function Trainer:test(test_data, test_labels, model, criterion, layers, dump_features, opt)
   model:evaluate()
-
   local classes = {}
   for i = 1, opt.num_classes do
     table.insert(classes, i)
@@ -139,10 +138,14 @@ function Trainer:test(test_data, test_labels, model, criterion, layers, dump_fea
   local conv_layer = get_layer(model, 'convolution')
 
   local test_size = test_data:size(1)
+  -- final output of score
+  local scores = torch.Tensor(test_size,1)
+
   local total_err = 0
-  for t = 1, test_size, opt.batch_size do
+  for t = 1, test_size, 1 do
     -- data samples and labels, in mini batches.
-    local batch_size = math.min(opt.batch_size, test_size - t + 1)
+    -- local batch_size = math.min(opt.batch_size, test_size - t + 1)
+    batch_size = 1
     local inputs = test_data:narrow(1, t, batch_size)
     local targets = test_labels:narrow(1, t, batch_size)
     if opt.cudnn == 1 then
@@ -152,8 +155,12 @@ function Trainer:test(test_data, test_labels, model, criterion, layers, dump_fea
       inputs = inputs:double()
       targets = targets:double()
     end
-
+    
     local outputs = model:forward(inputs)
+    m = nn.SoftMax()
+    local output = m:forward(outputs)
+    -- scores[t] = output[1][2]
+    -- print(math.floor(output[1][2]+0.5))
     -- dump feature maps from model forward
     local cur_feature_maps
     if opt.cudnn == 1 then
@@ -166,20 +173,18 @@ function Trainer:test(test_data, test_labels, model, criterion, layers, dump_fea
     else
       feature_maps = torch.cat(feature_maps, cur_feature_maps, 1)
     end
-
     local err = criterion:forward(outputs, targets)
+    
     total_err = total_err + err * batch_size
-
     for i = 1, batch_size do
       confusion:add(outputs[i], targets[i])
     end
   end
-
+  -- print(scores)
   if opt.debug == 1 then
-    print(confusion)
+    -- print(confusion)
     print('Total err: ' .. total_err / test_size)
   end
-
   if dump_features then
     assert(#opt.kernels == 1, 'multiple kernels not yet supported')
     local kernel = opt.kernels[1]
@@ -193,10 +198,33 @@ function Trainer:test(test_data, test_labels, model, criterion, layers, dump_fea
     f:write('word_idxs', word_idxs:long())
     f:close()
   end
-
-  -- return error percent
+    -- return error percent
   confusion:updateValids()
   return confusion.totalValid
+end
+
+
+function Trainer:test_caption(test_data, model, layers, opt)
+  model:evaluate()
+
+  local scores
+
+    if opt.cudnn == 1 then
+      inputs = test_data:cuda()
+
+    else
+      inputs = test_data:double()
+
+    end
+  -- print(inputs)
+  local outputs = model:forward(inputs)
+  -- convert log probabilities to probabilities
+  m = nn.SoftMax()
+  local output = m:forward(outputs)
+  -- the class label of 0 or 1
+  score = math.floor(output[1][2]+0.5)
+  -- print(score)
+  return score
 end
 
 return Trainer

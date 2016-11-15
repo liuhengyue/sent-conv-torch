@@ -4,6 +4,31 @@ import re
 import sys
 import operator
 import argparse
+import pickle
+
+def load_glovec(fname, vocab):
+    """
+    Loads 300x1 word vecs from GloVe
+    """
+    word_vecs = {}
+    with open(fname, "r") as f:
+        vocab_size, layer1_size = {2196016, 300}
+        # binary_len = np.dtype('float16').itemsize * layer1_size
+        for line in xrange(vocab_size):
+            word = []
+            while True:
+                ch = f.read(1)
+                if ch == ' ':
+                    word = ''.join(word)
+                    break
+                if ch != '\n':
+                    word.append(ch)   
+            if word in vocab:
+               vec = [float(v) for v in f.readline().rstrip('\n').split(' ')]
+               word_vecs[word] = np.array(vec)
+            else:
+                f.readline()
+    return word_vecs
 
 def load_bin_vec(fname, vocab):
     """
@@ -98,7 +123,7 @@ def load_data(dataset, train_name, test_name='', dev_name='', padding=4):
   for d, lbl, f in zip(data, data_label, files):
     for line in f:
       words = line_to_words(line, dataset)
-      y = int(line[0].split()[0]) + 1
+      y = int(line[0].split()[0]) + 1 
       sent = [word_to_idx[word] for word in words]
       # end padding
       if len(sent) < max_sent_len + padding:
@@ -114,7 +139,7 @@ def load_data(dataset, train_name, test_name='', dev_name='', padding=4):
     f_test.close()
   if not dev_name == '':
     f_dev.close()
-
+  # print test
   return word_to_idx, np.array(train, dtype=np.int32), np.array(train_label, dtype=np.int32), np.array(test, dtype=np.int32), np.array(test_label, dtype=np.int32), np.array(dev, dtype=np.int32), np.array(dev_label, dtype=np.int32)
 
 def clean_str(string):
@@ -170,9 +195,11 @@ def main():
   parser.add_argument('--dev', help="custom dev data", type=str, default="")
   parser.add_argument('--padding', help="padding around each sentence", type=int, default=4)
   parser.add_argument('--custom_name', help="name of custom output hdf5 file", type=str, default="custom")
-  args = parser.parse_args()
-  dataset = args.dataset
+  parser.add_argument('--max_sent_len', help="max lengh of sentences in the training and testing set", type=str, default=30)
 
+  args = parser.parse_args()
+
+  dataset = args.dataset
   # Dataset name
   if dataset == 'custom':
     # Train on custom dataset
@@ -181,7 +208,7 @@ def main():
   else:
     train_path, dev_path, test_path = FILE_PATHS[dataset]
 
-  # Load data
+  # # Load data
   word_to_idx, train, train_label, test, test_label, dev, dev_label = load_data(dataset, train_path, test_name=test_path, dev_name=dev_path, padding=args.padding)
 
   # Write word mapping to text file.
@@ -189,9 +216,10 @@ def main():
     embeddings_f.write("*PADDING* 1\n")
     for word, idx in sorted(word_to_idx.items(), key=operator.itemgetter(1)):
       embeddings_f.write("%s %d\n" % (word, idx))
-
+  with open('word2idx_mapping.txt', 'wb') as handle:
+    pickle.dump(word_to_idx, handle)
   # Load word2vec
-  w2v = load_bin_vec(args.w2v, word_to_idx)
+  w2v = load_glovec(args.w2v, word_to_idx)
   V = len(word_to_idx) + 1
   print 'Vocab size:', V
 

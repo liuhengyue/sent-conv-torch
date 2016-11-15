@@ -26,8 +26,8 @@ cmd:option('-dump_feature_maps_file', '', 'Set file to dump feature maps of conv
 cmd:text()
 
 -- Preset by preprocessed data
-cmd:option('-has_test', 1, 'If data has test, we use it. Otherwise, we use CV on folds')
-cmd:option('-has_dev', 1, 'If data has dev, we use it, otherwise we split from train')
+cmd:option('-has_test', 0, 'If data has test, we use it. Otherwise, we use CV on folds')
+cmd:option('-has_dev', 0, 'If data has dev, we use it, otherwise we split from train')
 cmd:option('-num_classes', 2, 'Number of output classes')
 cmd:option('-max_sent', 59, 'maximum sentence length')
 cmd:option('-vec_size', 300, 'word2vec vector size')
@@ -56,6 +56,10 @@ cmd:option('-highway_mlp', 0, 'Number of highway MLP layers')
 cmd:option('-highway_conv_layers', 0, 'Number of highway MLP layers')
 cmd:text()
 
+--input caption
+cmd:option('-input','','one single caption')
+
+------------------------- Those codes are for training ---------------------------------------------------------------------------
 function save_progress(fold_dev_scores, fold_test_scores, best_model, fold, opt)
   local savefile
   if opt.savefile ~= '' then
@@ -77,7 +81,7 @@ end
 
 -- build model for training
 function build_model(w2v)
-  local ModelBuilder = require 'model/convNN.lua'
+  local ModelBuilder = require 'model/convNN'
   local model_builder = ModelBuilder.new()
 
   local model
@@ -90,6 +94,7 @@ function build_model(w2v)
       require "cunn"
     end
     model = torch.load(opt.warm_start_model).model
+
   end
 
   local criterion = nn.ClassNLLCriterion()
@@ -235,11 +240,11 @@ function train_loop(all_train, all_train_label, test, test_label, dev, dev_label
   return fold_dev_scores, fold_test_scores, best_model
 end
 
+------------------------- Those codes are for testing/training --------------------------------------------------------------------
 function load_data()
   local train, train_label
   local dev, dev_label
   local test, test_label
-
   print('loading data...')
   assert(opt.data ~= '', 'must provide hdf5 datafile')
   local f = hdf5.open(opt.data, 'r')
@@ -247,7 +252,7 @@ function load_data()
   train = f:read('train'):all()
   train_label = f:read('train_label'):all()
   opt.num_classes = torch.max(train_label)
-
+  -- print(train)
   if f:read('dev'):dataspaceSize()[1] == 0 then
     opt.has_dev = 0
   else
@@ -262,6 +267,32 @@ function load_data()
     test = f:read('test'):all()
     test_label = f:read('test_label'):all()
   end
+  -- if opt.test_file ~= '' then
+  --   local f_test = io.open(opt.test_file, 'rb')
+  --   test = f_test:read('*all')
+  --   -- print(test)
+  --   f_test:close()
+  --   opt.has_test = 1
+  -- end
+  -- format the input caption (string) into tesor
+  if opt.input ~= '' then
+    t={}
+    test = torch.Tensor(1,train:size(2))
+    -- print(test)
+    s = test:storage()
+    j = 1
+    for i in string.gmatch(opt.input, "%S+") do
+      local num = tonumber(i)
+      if num ~= nil then
+        s[j] = num
+        j = j + 1
+      end
+      
+    end
+    -- print(test)
+    opt.has_test = 1
+  end
+  -- print(test)
   print('data loaded!')
 
   return train, train_label, test, test_label, dev, dev_label, w2v
@@ -287,11 +318,13 @@ function main()
   local test, test_label
   local dev, dev_label
   local w2v
+  local score
   train, train_label, test, test_label, dev, dev_label, w2v = load_data()
 
   opt.vocab_size = w2v:size(1)
   opt.vec_size = w2v:size(2)
   opt.max_sent = train:size(2)
+
   print('vocab size: ', opt.vocab_size)
   print('vec size: ', opt.vec_size)
 
@@ -323,10 +356,20 @@ function main()
     local trainer = Trainer.new()
     print('Testing...')
     local model, criterion, layers = build_model(w2v)
+    -- codes for printing out the nn nodes
+    -- for i,module in ipairs(model:listModules()) do
+    --   print(module)
+    -- end
     local dump_features = (opt.dump_feature_maps_file ~= '')
-    local test_err = trainer:test(test, test_label, model, criterion, layers, dump_features, opt)
-    print('Test score:', test_err)
-    os.exit()
+    if opt.input ~= '' then
+      -- Output score is here!!!!!!!!!!!!!!!!!!!!!!
+      score = trainer:test_caption(test, model, layers, opt)
+    else
+      local test_err = trainer:test(test, test_label, model, criterion, layers, dump_features, opt)
+    end
+    print('Test score:', score)
+    os.exit(score)
+    -- return score
   end
 
   if opt.has_test == 1 or opt.train_only == 1 then
